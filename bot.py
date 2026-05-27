@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+  #!/usr/bin/env python3
 """
 📱 Phone Service Tracker Bot
 ဖုန်းပြုပြင်ရေး Job မှတ်တမ်း Telegram Bot
@@ -614,6 +614,119 @@ async def monthly(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ══════════════════════════════════════════
+# CUSTOMER STATUS CHECK
+# ══════════════════════════════════════════
+
+CUST_CHECK_CODE = 10
+
+async def check_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Customer က /check နှိပ်ပြီး Job Code ထည့်ကြည့်နိုင်သည်"""
+    await update.message.reply_text(
+        "🔍 *Service Job Status စစ်ဆေးမည်*\n\n"
+        "📋 Job Code ထည့်ပါ\n"
+        "_(e.g. SVC-0001)_\n\n"
+        "_ပြင်ဆိုင်မှ ပေးသော Code ဖြစ်ရမည်_",
+        parse_mode='Markdown'
+    )
+    return CUST_CHECK_CODE
+
+async def check_exec(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip().upper()
+    conn = db()
+    c    = conn.cursor()
+    # Job Code နဲ့ ရှာ — chat_id မစစ်ဘဲ ရှာသည် (Customer မည်သူမဆို ကြည့်နိုင်)
+    c.execute('SELECT * FROM jobs WHERE job_code=?', (code,))
+    job = c.fetchone()
+    conn.close()
+
+    if not job:
+        await update.message.reply_text(
+            f"❌ *{code}* မတွေ့ပါ\n\n"
+            "Job Code မှန်မှန်ထည့်ပါ\n"
+            "_(ဆိုင်မှ ပေးသော ဘောင်ချာ/ဖြတ်ပိုင်းတွင် ကြည့်ပါ)_",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+    _, code, name, phone, device, issue, price, notes, status, created, updated, _ = job
+    stat = STATUS_LABEL.get(status, status)
+
+    # Status အလိုက် message ပြောင်း
+    status_msg = {
+        'pending':       "⏳ ဆိုင်တွင် လက်ခံထားပြီး စစ်ဆေးဆဲဖြစ်သည်",
+        'inprogress':    "🔧 ယခုပြင်ဆင်နေဆဲဖြစ်သည်",
+        'waiting_parts': "📦 အပိုပစ္စည်း ရောက်ရှိစောင့်ဆဲဖြစ်သည်",
+        'done':          "✅ ပြင်ဆင်မှု ပြီးစီးပြီ — ဆိုင်သို့ လာရယူနိုင်ပါပြီ",
+        'delivered':     "📤 ပြန်လည်ထုတ်ပေးပြီးဖြစ်သည်",
+        'cancelled':     "❌ Job ပယ်ဖျက်ထားသည်",
+    }.get(status, stat)
+
+    await update.message.reply_text(
+        f"📱 *Service Job အခြေအနေ*\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🔖 Code: *{code}*\n"
+        f"📱 Device: {device}\n"
+        f"🔧 ပြဿနာ: {issue}\n"
+        f"💰 ငွေကြေး: {fmt_money(price)}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📊 *{stat}*\n\n"
+        f"ℹ️ {status_msg}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📅 လက်ခံချိန်: {fmt_dt(created)}\n"
+        f"🔄 နောက်ဆုံး Update: {fmt_dt(updated)}",
+        parse_mode='Markdown'
+    )
+    return ConversationHandler.END
+
+async def mystatus_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """ဖုန်းနံပါတ်ဖြင့် မိမိ Jobs အားလုံး ကြည့်နိုင်သည်"""
+    await update.message.reply_text(
+        "📞 *မိမိ Service Jobs ကြည့်မည်*\n\n"
+        "ဆိုင်တွင် မှတ်ပုံတင်ထားသော\n"
+        "*ဖုန်းနံပါတ်* ထည့်ပါ:",
+        parse_mode='Markdown'
+    )
+    return CUST_CHECK_CODE + 1
+
+async def mystatus_exec(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    phone = update.message.text.strip()
+    conn  = db()
+    c     = conn.cursor()
+    c.execute(
+        'SELECT * FROM jobs WHERE cust_phone LIKE ? ORDER BY created_at DESC LIMIT 5',
+        (f'%{phone[-6:]}%',)   # နောက်ဆုံး ၆ လုံးဖြင့် ရှာ
+    )
+    jobs = c.fetchall()
+    conn.close()
+
+    if not jobs:
+        await update.message.reply_text(
+            "❌ မတွေ့ပါ\n\nဆိုင်တွင် မှတ်ပုံတင်ထားသော ဖုန်းနံပါတ် ထည့်ပါ"
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"📋 *{phone} နဲ့ ဆက်စပ်သော Jobs {len(jobs)} ခု*",
+        parse_mode='Markdown'
+    )
+
+    for job in jobs:
+        _, code, name, _, device, issue, price, _, status, created, updated, _ = job
+        stat = STATUS_LABEL.get(status, status)
+        done_msg = "\n✅ *ဆိုင်သို့ လာရယူနိုင်ပါပြီ*" if status == 'done' else ""
+        await update.message.reply_text(
+            f"🔖 *{code}*\n"
+            f"📱 {device} — {issue}\n"
+            f"💰 {fmt_money(price)}\n"
+            f"📊 {stat}\n"
+            f"📅 {fmt_dt(created)}"
+            f"{done_msg}",
+            parse_mode='Markdown'
+        )
+    return ConversationHandler.END
+
+
+# ══════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════
 
@@ -660,8 +773,22 @@ def main():
     )
 
     # Register handlers
+    # Customer check conversations
+    check_conv = ConversationHandler(
+        entry_points=[CommandHandler('check', check_start)],
+        states={CUST_CHECK_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_exec)]},
+        fallbacks=[CommandHandler('cancel', cancel_conv)],
+    )
+    mystatus_conv = ConversationHandler(
+        entry_points=[CommandHandler('mystatus', mystatus_start)],
+        states={CUST_CHECK_CODE + 1: [MessageHandler(filters.TEXT & ~filters.COMMAND, mystatus_exec)]},
+        fallbacks=[CommandHandler('cancel', cancel_conv)],
+    )
+
     app.add_handler(CommandHandler('start',      start))
     app.add_handler(CommandHandler('help',       help_cmd))
+    app.add_handler(check_conv)
+    app.add_handler(mystatus_conv)
     app.add_handler(CommandHandler('jobs',       show_jobs))
     app.add_handler(CommandHandler('pending',    show_pending))
     app.add_handler(CommandHandler('inprogress', show_inprogress))
